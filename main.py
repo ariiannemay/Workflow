@@ -25,7 +25,6 @@ def keep_alive():
 # --- CONFIGURATION ---
 TOKEN = os.getenv("DISCORD_TOKEN") 
 SWC_ROLE_NAME = "Senior Workflow Coordinator"
-# Added both IDs (Official and Test)
 SWC_ROLE_IDS = [1391602377672491198, 1450395825208299582]
 
 EMOJI_TO_FILE = {
@@ -91,12 +90,8 @@ def save_config():
 # --- HELPER FUNCTIONS ---
 def is_swc(interaction: discord.Interaction):
     if not isinstance(interaction.user, discord.Member): return False
-    
-    # 1. Check against the explicit Role IDs provided
     if any(role.id in SWC_ROLE_IDS for role in interaction.user.roles):
         return True
-        
-    # 2. Check Name as fallback
     user_role_names = [role.name for role in interaction.user.roles]
     return SWC_ROLE_NAME in user_role_names
 
@@ -119,7 +114,6 @@ async def send_log(guild, content=None, embed=None):
 # --- SHARED ASSIGNMENT LOGIC ---
 async def assign_logic(user, file_type, channel, assigner):
     time_tag = get_time_tag()
-    
     global work_queue
     in_queue = False
     if any(item['user_id'] == user.id for item in work_queue):
@@ -149,14 +143,11 @@ async def assign_logic(user, file_type, channel, assigner):
     await send_log(channel.guild, embed=log_embed)
 
 # --- TAT CALCULATOR LOGIC ---
-
 class TATModal(ui.Modal):
     def __init__(self, file_type):
         super().__init__(title=f"TAT Calculator: {file_type}")
         self.file_type = file_type
-
     audio_len = ui.TextInput(label="Audio Length", placeholder="HH:MM:SS (e.g. 01:30:00)", max_length=8)
-
     async def on_submit(self, interaction: discord.Interaction):
         time_str = self.audio_len.value.strip()
         try:
@@ -216,7 +207,6 @@ class TATView(ui.View):
         await interaction.response.send_modal(TATModal(select.values[0]))
 
 # --- MODALS (FORMS) ---
-
 class AvailabilityModal(ui.Modal):
     def __init__(self, title_text):
         super().__init__(title=title_text)
@@ -344,12 +334,12 @@ async def on_message(message):
 # --- SLASH COMMANDS ---
 
 @bot.tree.command(name="setlogchannel", description="Set the channel where bot logs will be sent")
-@app_commands.default_permissions(administrator=True) # Invisible to normal users
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only() # <--- Added to prevent User Install abuse
 async def set_log_channel(interaction: discord.Interaction):
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
-    
     server_configs[str(interaction.guild_id)] = interaction.channel_id
     save_config()
     await interaction.response.send_message(f"✅ Logging channel set to {interaction.channel.mention}", ephemeral=True)
@@ -365,7 +355,6 @@ async def available(interaction: discord.Interaction):
     if now_ts - last_used < 30:
         await interaction.response.send_message("⏳ Please wait a moment before using this again.", ephemeral=True)
         return
-    
     available_cooldowns[interaction.user.id] = now_ts
 
     if any(item['user_id'] == interaction.user.id for item in work_queue):
@@ -378,7 +367,6 @@ async def available(interaction: discord.Interaction):
         'time': int(datetime.now().timestamp())
     })
     save_queue()
-    
     await interaction.response.send_message(f"👋🏼 {interaction.user.mention} is available for a file. Added to the queue.")
     
     queue_pos = len(work_queue)
@@ -394,7 +382,6 @@ async def available(interaction: discord.Interaction):
         await interaction.user.send(dm_content)
     except:
         pass
-    
     log_embed = discord.Embed(title="User Available", description=f"{interaction.user.mention} joined via command.", color=discord.Color.blue())
     await send_log(interaction.guild, embed=log_embed)
 
@@ -404,7 +391,6 @@ async def optout(interaction: discord.Interaction):
     original_len = len(work_queue)
     work_queue = [item for item in work_queue if item['user_id'] != interaction.user.id]
     save_queue()
-    
     if len(work_queue) < original_len:
         await interaction.response.send_message("You have removed yourself from the queue.", ephemeral=True)
         await send_log(interaction.guild, content=f"📤 {interaction.user.mention} opted out of queue.")
@@ -412,35 +398,32 @@ async def optout(interaction: discord.Interaction):
         await interaction.response.send_message("You were not in the queue.", ephemeral=True)
 
 @bot.tree.command(name="queue", description="Show the current waiting list")
-@app_commands.default_permissions(administrator=True) # Invisible to normal users
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only() # <--- Added
 async def show_queue(interaction: discord.Interaction):
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
-
     if not work_queue:
         await interaction.response.send_message("The queue is empty.", ephemeral=True)
         return
-
     current_time_tag = get_time_tag()
     embed = discord.Embed(title="Current Work Queue", color=discord.Color.blue())
-    
     desc = f"**As of:** {current_time_tag}\n\n"
     for idx, item in enumerate(work_queue, 1):
         member = interaction.guild.get_member(item['user_id'])
         name_display = member.mention if member else item['name']
         desc += f"**{idx}.** {name_display} | <t:{item['time']}:R>\n"
-    
     embed.description = desc
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="remove", description="Remove a specific user from the queue")
-@app_commands.default_permissions(administrator=True) # Invisible to normal users
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only() # <--- Added
 async def remove_user(interaction: discord.Interaction, member: discord.Member):
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
-
     global work_queue
     work_queue = [item for item in work_queue if item['user_id'] != member.id]
     save_queue()
@@ -448,12 +431,12 @@ async def remove_user(interaction: discord.Interaction, member: discord.Member):
     await send_log(interaction.guild, content=f"❌ {member.mention} removed from queue by {interaction.user.mention}")
 
 @bot.tree.command(name="resetqueue", description="Clear the entire queue")
-@app_commands.default_permissions(administrator=True) # Invisible to normal users
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only() # <--- Added
 async def reset_queue(interaction: discord.Interaction):
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
-
     work_queue.clear()
     save_queue()
     time_tag = get_time_tag()
@@ -462,18 +445,19 @@ async def reset_queue(interaction: discord.Interaction):
 
 @bot.tree.command(name="assign", description="Assign a file to a user")
 @app_commands.choices(file_type=FILE_CHOICES)
-@app_commands.default_permissions(administrator=True) # Invisible to normal users
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only() # <--- Added
 async def assign(interaction: discord.Interaction, member: discord.Member, file_type: app_commands.Choice[str]):
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
-
     await interaction.response.defer(ephemeral=True)
     await assign_logic(member, file_type.value, interaction.channel, interaction.user)
     await interaction.followup.send("Assignment processed.", ephemeral=True)
 
 @bot.tree.command(name="askfileupdate", description="Ask a user for an update on their file")
-@app_commands.default_permissions(administrator=True) # Invisible to normal users
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only() # <--- Added
 async def ask_update(interaction: discord.Interaction, user: discord.Member):
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
@@ -481,12 +465,12 @@ async def ask_update(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.send_message(f"🔍 {user.mention}, please provide an update on your file.")
 
 @bot.tree.command(name="reassign_notif", description="Notify editor of reassignment")
-@app_commands.default_permissions(administrator=True) # Invisible to normal users
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only() # <--- Added
 async def reassign_notif(interaction: discord.Interaction, member: discord.Member):
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
-
     try:
         await member.send(f"⚠️ {member.mention}, your file has been REASSIGNED due to idleness.")
         await interaction.response.send_message(f"✅ Notification sent to {member.mention}.", ephemeral=True)
@@ -513,12 +497,12 @@ async def file_update(interaction: discord.Interaction):
 
 # --- CONTEXT MENU COMMANDS (RIGHT CLICK) ---
 @bot.tree.context_menu(name="Assign a File")
-@app_commands.default_permissions(administrator=True) # Invisible to normal users
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only() # <--- Added
 async def context_assign(interaction: discord.Interaction, member: discord.Member):
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
-    
     await interaction.response.send_message(
         f"Select file type for {member.mention}:", 
         view=AssignView(member, interaction.channel), 
@@ -526,12 +510,12 @@ async def context_assign(interaction: discord.Interaction, member: discord.Membe
     )
 
 @bot.tree.context_menu(name="Remove from Queue")
-@app_commands.default_permissions(administrator=True) # Invisible to normal users
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only() # <--- Added
 async def context_remove(interaction: discord.Interaction, member: discord.Member):
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
-
     global work_queue
     work_queue = [item for item in work_queue if item['user_id'] != member.id]
     save_queue()
@@ -539,7 +523,8 @@ async def context_remove(interaction: discord.Interaction, member: discord.Membe
     await send_log(interaction.guild, content=f"❌ {member.mention} removed from queue (Context Menu) by {interaction.user.mention}")
 
 @bot.tree.context_menu(name="Ask for Update")
-@app_commands.default_permissions(administrator=True) # Invisible to normal users
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only() # <--- Added
 async def context_ask_update(interaction: discord.Interaction, member: discord.Member):
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
@@ -550,19 +535,17 @@ async def context_ask_update(interaction: discord.Interaction, member: discord.M
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id: return
-    
     if payload.emoji.name in EMOJI_TO_FILE:
         guild = bot.get_guild(payload.guild_id)
         if not guild: return
         reactor = guild.get_member(payload.user_id)
         if not reactor: return
         
-        # 1. Check ID
+        is_swc_reactor = False
         if any(role.id in SWC_ROLE_IDS for role in reactor.roles):
             is_swc_reactor = True
-        else:
-            # 2. Check Name (Fallback)
-            is_swc_reactor = SWC_ROLE_NAME in [role.name for role in reactor.roles]
+        elif SWC_ROLE_NAME in [role.name for role in reactor.roles]:
+            is_swc_reactor = True
 
         if not is_swc_reactor: return
 
@@ -571,9 +554,7 @@ async def on_raw_reaction_add(payload):
             message = await channel.fetch_message(payload.message_id)
             editor = message.author
         except: return
-
         if editor.bot: return
-
         file_type = EMOJI_TO_FILE[payload.emoji.name]
         await assign_logic(editor, file_type, channel, reactor)
         await message.add_reaction("💼")
