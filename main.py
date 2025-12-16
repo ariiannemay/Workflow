@@ -78,7 +78,7 @@ async def on_raw_reaction_add(payload):
 
         dm_content = (
             f"# Hello {editor.mention}! You have been assigned a **{file_type}** at {time_tag}.\n\n" 
-            f"## Please start on them immediately."
+            f"## Please start on them immediately.\n\n"
             f"### REMINDERS:\n\n"
             f"- If no movement is observed on your file for at least 5 minutes, and if your file is at risk of breaching TAT, Senior Workflow Coordinator may REASSIGN your file without prior notice."
             f"- If you will take longer on a file, keep the SWC properly appraised. Include your reasons and estimated TAT."
