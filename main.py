@@ -86,7 +86,7 @@ async def on_raw_reaction_add(payload):
 
         try:
             await editor.send(dm_content)
-            await message.add_reaction("✅")
+            await message.add_reaction("📩")
         except discord.Forbidden:
             await channel.send(f"{editor.mention} ⚠️ I cannot DM you. Assigned: **{file_type}**.")
 
