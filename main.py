@@ -220,7 +220,6 @@ class TATView(ui.View):
 class AvailabilityModal(ui.Modal):
     def __init__(self, title_text):
         super().__init__(title=title_text)
-    name = ui.TextInput(label="Name", placeholder="Your full name")
     time_affected = ui.TextInput(label="Date and Time Affected", placeholder="e.g. Dec 25, 4pm-9am")
     change_type = ui.TextInput(label="Change Requested", placeholder="Available --> Unavailable OR Unavailable --> Available")
     reason = ui.TextInput(label="Reason", style=discord.TextStyle.paragraph)
@@ -228,11 +227,10 @@ class AvailabilityModal(ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         msg = (
             f"## {self.title} Request\n"
-            f"**`EDITOR:`** {interaction.user.mention}\n"
-            f"**`NAME:`** {self.name.value}\n"
-            f"**`DATE AND TIME AFFECTED:`** {self.time_affected.value}\n"
-            f"**`CHANGE REQUESTED:`** {self.change_type.value}\n"
-            f"**`REASON:`** {self.reason.value}"
+            f"- **`EDITOR:`** {interaction.user.mention}\n"
+            f"- **`DATE AND TIME AFFECTED:`** {self.time_affected.value}\n"
+            f"- **`CHANGE REQUESTED:`** {self.change_type.value}\n"
+            f"- **`REASON:`** {self.reason.value}"
         )
         await interaction.response.send_message(msg)
         log_embed = discord.Embed(title=f"{self.title} Request", description=self.reason.value, color=discord.Color.orange())
@@ -246,9 +244,9 @@ class PermissionTATModal(ui.Modal, title="Permission to exceed TAT"):
     async def on_submit(self, interaction: discord.Interaction):
         msg = (
             f"## Permission to exceed TAT\n"
-            f"**`EDITOR:`** {interaction.user.mention}\n"
-            f"**`FILE NAME:`** {self.file_name.value}\n"
-            f"**`REASON:`** {self.reason.value}"
+            f"- **`EDITOR:`** {interaction.user.mention}\n"
+            f"- **`FILE NAME:`** {self.file_name.value}\n"
+            f"- **`REASON:`** {self.reason.value}"
         )
         await interaction.response.send_message(msg)
         await send_log(interaction.guild, content=msg)
