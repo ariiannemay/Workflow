@@ -77,12 +77,11 @@ async def on_raw_reaction_add(payload):
         file_type = EMOJI_TO_FILE[emoji_name]
 
         dm_content = (
-            f"Hello {editor.mention}, you have been assigned a **{file_type}** "
-            f"at {time_tag}. Please start on them immediately.\n\n"
-            f"Reminder that if no movement is observed on your file for at least 5 minutes, "
-            f"and if your file is at risk of breaching TAT, @Senior Workflow Coordinator may "
-            f"REASSIGN your file without prior notice. If you will take longer on a file, "
-            f"keep @Senior Workflow Coordinator properly appraised. Include your reasons."
+            f"# Hello {editor.mention}! You have been assigned a **{file_type}** at {time_tag}.\n\n" 
+            f"## Please start on them immediately."
+            f"### REMINDERS:\n\n"
+            f"- If no movement is observed on your file for at least 5 minutes, and if your file is at risk of breaching TAT, Senior Workflow Coordinator may REASSIGN your file without prior notice."
+            f"- If you will take longer on a file, keep the SWC properly appraised. Include your reasons and estimated TAT."
         )
 
         try:
