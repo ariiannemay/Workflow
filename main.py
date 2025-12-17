@@ -322,7 +322,7 @@ async def on_message(message):
             })
             save_queue()
             
-            await message.reply(f"👋🏼 {message.author.mention} is available for a file. Added to the queue.", mention_author=True)
+            await message.reply(f"👋🏼 {message.author.mention} is available for a file.\n-# Added to the queue.", mention_author=True)
             
             queue_pos = len(work_queue)
             time_tag = get_time_tag()
@@ -380,7 +380,7 @@ async def available(interaction: discord.Interaction):
         'time': int(datetime.now().timestamp())
     })
     save_queue()
-    await interaction.response.send_message(f"👋🏼 {interaction.user.mention} is available for a file. Added to the queue.")
+    await message.reply(f"👋🏼 {message.author.mention} is available for a file.\n-# Added to the queue.", mention_author=True)
     
     queue_pos = len(work_queue)
     time_tag = get_time_tag()
