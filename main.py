@@ -177,7 +177,7 @@ async def assign_logic(user, file_type, channel, assigner):
 
     # 4. Prepare DM with Hyperlink
     dm_content = (
-        f"# Hello {user.mention}!\n
+        f"# Hello {user.mention}!\n"
         f"# You have been assigned a **{file_type}** at {time_tag}.\n\n" 
         f"## Please start on them immediately and [confirm receipt]({jump_url}) in the channel.\n\n"
         f"### REMINDERS:\n\n"
