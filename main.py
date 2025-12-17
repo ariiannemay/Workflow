@@ -564,6 +564,54 @@ async def context_ask_update(interaction: discord.Interaction, member: discord.M
         return
     await interaction.response.send_message(f"🔍 {member.mention}, please provide an update on your file.")
 
+# --- NEW CONTEXT MENU: ADD TO QUEUE ---
+@bot.tree.context_menu(name="Add to Queue")
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only()
+async def context_add_queue(interaction: discord.Interaction, member: discord.Member):
+    # 1. Security Check
+    if not is_swc(interaction):
+        await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
+        return
+
+    # 2. Check if already in queue
+    global work_queue
+    if any(item['user_id'] == member.id for item in work_queue):
+        await interaction.response.send_message(f"{member.mention} is already in the queue!", ephemeral=True)
+        return
+
+    # 3. Add to Queue
+    work_queue.append({
+        'user_id': member.id,
+        'name': member.display_name,
+        'time': int(datetime.now().timestamp())
+    })
+    save_queue()
+
+    # 4. Public Confirmation (The Wave)
+    await interaction.response.send_message(f"👋🏼 {member.mention} is added to the queue.")
+
+    # 5. DM the User (Identical to /available)
+    queue_pos = len(work_queue)
+    time_tag = get_time_tag()
+    dm_content = (
+        f"You are added to the queue. As of {time_tag}, you are at queue #{queue_pos}.\n\n"
+        f"**IMPORTANT REMINDERS:**\n"
+        f"- Audio project assignments are NOT preference-based.\n"
+        f"- Queue numbers are **NOT a guarantee** that files will be assigned chronologically.\n"
+        f"- Please be reminded of our *Reminder on Eligibility for Audio Project Assignments.*"
+    )
+    try:
+        await member.send(dm_content)
+    except:
+        pass
+
+    # 6. Log it (Embed)
+    log_embed = discord.Embed(title="User Added to Queue (Admin)", color=discord.Color.blue())
+    log_embed.add_field(name="User", value=member.mention, inline=True)
+    log_embed.add_field(name="Added By", value=interaction.user.mention, inline=True)
+    await send_log(interaction.guild, embed=log_embed)
+
 # --- EMOJI LISTENER (LEGACY) ---
 @bot.event
 async def on_raw_reaction_add(payload):
