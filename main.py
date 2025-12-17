@@ -36,6 +36,8 @@ EMOJI_TO_FILE = {
     "🇶": "QUARTR FILE", 
     "🇭": "HP FILE",            
     "🇦": "AIERA FILE", 
+    "QUARTR": "QUARTR FILE",
+    "AIERA": "AIERA FILE",
 }
 
 FILE_CHOICES = [
@@ -116,30 +118,80 @@ async def send_log(guild, content=None, embed=None, view=None):
                 return False
     return False
 
+# --- ASSIGNMENT CONFIRMATION SYSTEM ---
+
+class ReceiptModal(ui.Modal, title="Confirm File Receipt"):
+    file_name = ui.TextInput(label="File Name", placeholder="Enter the exact file name...")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Disable buttons on the original message to prevent double-clicks
+        try:
+            await interaction.message.edit(view=None)
+        except:
+            pass
+        
+        await interaction.response.send_message(f"🔖 {interaction.user.mention} received **{self.file_name.value}**")
+
+class AssignmentConfirmView(ui.View):
+    def __init__(self, assigned_user_id):
+        super().__init__(timeout=None)
+        self.assigned_user_id = assigned_user_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.assigned_user_id:
+            await interaction.response.send_message("⛔ You cannot verify a file assigned to someone else.", ephemeral=True)
+            return False
+        return True
+
+    @ui.button(label="Received", style=discord.ButtonStyle.green, emoji="📥")
+    async def received_btn(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.send_modal(ReceiptModal())
+
+    @ui.button(label="Not Received", style=discord.ButtonStyle.red, emoji="❌")
+    async def not_received_btn(self, interaction: discord.Interaction, button: ui.Button):
+        # Disable buttons
+        try:
+            await interaction.message.edit(view=None)
+        except:
+            pass
+        await interaction.response.send_message(f"🔖 {interaction.user.mention} has not received the file. Contact SWC.")
+
 # --- SHARED ASSIGNMENT LOGIC ---
 async def assign_logic(user, file_type, channel, assigner):
     time_tag = get_time_tag()
     global work_queue
     in_queue = False
+    
+    # 1. Update Queue
     if any(item['user_id'] == user.id for item in work_queue):
         work_queue = [item for item in work_queue if item['user_id'] != user.id]
         save_queue()
         in_queue = True
 
+    # 2. Prepare Confirmation Buttons
+    view = AssignmentConfirmView(user.id)
+
+    # 3. Send Public Message FIRST (to get the URL for the DM)
+    public_msg = await channel.send(f"💼 {user.mention} has been assigned a **{file_type}** at {time_tag}.", view=view)
+    jump_url = public_msg.jump_url
+
+    # 4. Prepare DM with Hyperlink
     dm_content = (
-        f"# Hello {user.mention}! You have been assigned a **{file_type}** at {time_tag}.\n\n" 
-        f"## Please start on them immediately.\n\n"
+        f"# Hello {user.mention}!\n
+        f"# You have been assigned a **{file_type}** at {time_tag}.\n\n" 
+        f"## Please start on them immediately and [confirm receipt]({jump_url}) in the channel.\n\n"
         f"### REMINDERS:\n\n"
         f"- If no movement is observed on your file for at least 5 minutes, and if your file is at risk of breaching TAT, the SWCs may REASSIGN your file without prior notice.\n"
         f"- If you will take longer on a file, keep the SWCs properly appraised. Include your reasons and estimated TAT."
     )
 
+    # 5. Send DM
     try:
         await user.send(dm_content)
-        await channel.send(f"💼 {user.mention} has been assigned a **{file_type}** at {time_tag}.")
     except discord.Forbidden:
         await channel.send(f"⚠️ {user.mention} (I cannot DM you) — You have been assigned a **{file_type}** at {time_tag}. Please check your privacy settings.")
 
+    # 6. Log it
     log_embed = discord.Embed(title="File Assigned", color=discord.Color.green())
     log_embed.add_field(name="Editor", value=f"{user.display_name} ({user.id})", inline=True)
     log_embed.add_field(name="File Type", value=file_type, inline=True)
@@ -235,11 +287,8 @@ class AvailabilityModal(ui.Modal):
         log_embed.add_field(name="Change Type", value=self.change_type.value, inline=False)
         log_embed.add_field(name="Reason", value=self.reason.value, inline=False)
         
-        sent = await send_log(interaction.guild, embed=log_embed)
-        if sent:
-            await interaction.response.send_message(msg + "\n\n✅ **Request submitted to logs.**", ephemeral=True)
-        else:
-            await interaction.response.send_message(msg + "\n\n⚠️ **Log Channel NOT set!** Please ask an SWC to run `/setlogchannel`.", ephemeral=True)
+        await interaction.response.send_message(msg)
+        await send_log(interaction.guild, embed=log_embed)
 
 class PermissionTATModal(ui.Modal, title="Permission to exceed TAT"):
     file_name = ui.TextInput(label="File Name")
@@ -258,11 +307,8 @@ class PermissionTATModal(ui.Modal, title="Permission to exceed TAT"):
         log_embed.add_field(name="File Name", value=self.file_name.value, inline=True)
         log_embed.add_field(name="Reason", value=self.reason.value, inline=False)
         
-        sent = await send_log(interaction.guild, embed=log_embed)
-        if sent:
-            await interaction.response.send_message(msg + "\n\n✅ **Request submitted to logs.**", ephemeral=True)
-        else:
-            await interaction.response.send_message(msg + "\n\n⚠️ **Log Channel NOT set!** Please ask an SWC to run `/setlogchannel`.", ephemeral=True)
+        await interaction.response.send_message(msg)
+        await send_log(interaction.guild, embed=log_embed)
 
 class FileUpdateModal(ui.Modal, title="File Update"):
     file_name = ui.TextInput(label="File Name")
@@ -298,14 +344,15 @@ class AssignView(ui.View):
         file_type = select.values[0]
         await interaction.response.defer() 
         await assign_logic(self.member, file_type, self.channel, interaction.user)
-        await interaction.followup.send(f"Assigned {file_type} to {self.member.display_name}", ephemeral=True)
+        await interaction.followup.send(f"Assigned {file_type} to {self.member.display_name}", ephemeral=False)
 
 # --- VIEWS (BUTTONS) FOR REPORTS ---
 
 class RevertView(ui.View):
-    def __init__(self, target_user: discord.Member):
+    def __init__(self, target_user: discord.Member, original_msg_content: str):
         super().__init__() 
         self.target_user = target_user
+        self.original_msg_content = original_msg_content
 
     async def send_dm(self, interaction, status):
         log_url = interaction.message.jump_url
@@ -314,36 +361,44 @@ class RevertView(ui.View):
         except:
             await interaction.followup.send("❌ Could not DM user (Privacy Settings).", ephemeral=True)
 
-    @ui.button(label="Reverted", style=discord.ButtonStyle.green, custom_id="rev_approve")
+    @ui.button(label="Revert", style=discord.ButtonStyle.green, custom_id="rev_approve")
     async def approve(self, interaction: discord.Interaction, button: ui.Button):
         if not is_swc(interaction): return await interaction.response.send_message("⛔ SWC Only", ephemeral=True)
         
         await interaction.response.defer()
         await self.send_dm(interaction, "APPROVED")
         
-        for child in self.children:
-            child.disabled = True
+        # Modify content and buttons
+        new_content = self.original_msg_content.replace("## Revert Request", "## Revert Request [APPROVED]")
         
-        await interaction.message.edit(view=self)
+        # Clear existing items and add only the "Reverted" button
+        self.clear_items()
+        self.add_item(ui.Button(label="Reverted", style=discord.ButtonStyle.green, disabled=True))
+        
+        await interaction.message.edit(content=new_content, view=self)
         await interaction.followup.send("✅ Revert marked as DONE.", ephemeral=True)
 
-    @ui.button(label="Denied", style=discord.ButtonStyle.red, custom_id="rev_deny")
+    @ui.button(label="Deny", style=discord.ButtonStyle.red, custom_id="rev_deny")
     async def deny(self, interaction: discord.Interaction, button: ui.Button):
         if not is_swc(interaction): return await interaction.response.send_message("⛔ SWC Only", ephemeral=True)
         
         await interaction.response.defer()
         await self.send_dm(interaction, "DENIED")
         
-        for child in self.children:
-            child.disabled = True
+        new_content = self.original_msg_content.replace("## Revert Request", "## Revert Request [DENIED]")
+        
+        # Clear existing items and add only the "Denied" button
+        self.clear_items()
+        self.add_item(ui.Button(label="Denied", style=discord.ButtonStyle.red, disabled=True))
             
-        await interaction.message.edit(view=self)
+        await interaction.message.edit(content=new_content, view=self)
         await interaction.followup.send("❌ Revert marked as DENIED.", ephemeral=True)
 
 class ReworkView(ui.View):
-    def __init__(self, target_user: discord.Member):
+    def __init__(self, target_user: discord.Member, original_msg_content: str):
         super().__init__()
         self.target_user = target_user
+        self.original_msg_content = original_msg_content
 
     async def send_dm(self, interaction, status):
         log_url = interaction.message.jump_url
@@ -352,18 +407,32 @@ class ReworkView(ui.View):
         except:
             await interaction.followup.send("❌ Could not DM user (Privacy Settings).", ephemeral=True)
 
-    @ui.button(label="Validated", style=discord.ButtonStyle.green, custom_id="rew_valid")
+    @ui.button(label="Validate", style=discord.ButtonStyle.green, custom_id="rew_valid")
     async def validate(self, interaction: discord.Interaction, button: ui.Button):
         if not is_swc(interaction): return await interaction.response.send_message("⛔ SWC Only", ephemeral=True)
         await interaction.response.defer()
         await self.send_dm(interaction, "VALIDATED")
+        
+        new_content = self.original_msg_content.replace("## Rework Report", "## Rework Report [VALIDATED]")
+        
+        self.clear_items()
+        self.add_item(ui.Button(label="Validated", style=discord.ButtonStyle.green, disabled=True))
+        
+        await interaction.message.edit(content=new_content, view=self)
         await interaction.followup.send("✅ User notified (Validated).", ephemeral=True)
 
-    @ui.button(label="Noted", style=discord.ButtonStyle.blurple, custom_id="rew_note")
+    @ui.button(label="Note", style=discord.ButtonStyle.blurple, custom_id="rew_note")
     async def note(self, interaction: discord.Interaction, button: ui.Button):
         if not is_swc(interaction): return await interaction.response.send_message("⛔ SWC Only", ephemeral=True)
         await interaction.response.defer()
         await self.send_dm(interaction, "NOTED")
+        
+        new_content = self.original_msg_content.replace("## Rework Report", "## Rework Report [NOTED]")
+        
+        self.clear_items()
+        self.add_item(ui.Button(label="Noted", style=discord.ButtonStyle.blurple, disabled=True))
+        
+        await interaction.message.edit(content=new_content, view=self)
         await interaction.followup.send("📝 User notified (Noted).", ephemeral=True)
 
 # --- MODALS FOR REPORTS ---
@@ -385,7 +454,7 @@ class RevertRequestModal(ui.Modal, title="Revert Request"):
         )
         
         # FIXED: Send to current channel instead of Log Channel
-        await interaction.channel.send(content=msg, view=RevertView(interaction.user))
+        await interaction.channel.send(content=msg, view=RevertView(interaction.user, msg))
         await interaction.response.send_message("✅ Revert Request posted in this channel.", ephemeral=True)
 
 class ReworkReportModal(ui.Modal, title="Rework Report"):
@@ -394,7 +463,11 @@ class ReworkReportModal(ui.Modal, title="Rework Report"):
     file_type = ui.TextInput(label="File Type", placeholder="e.g. Aiera Batch, Aiera Live, HP...")
     changes_req = ui.TextInput(label="Changes Requested (Number)", placeholder="0")
     changes_app = ui.TextInput(label="Changes Applied (Number)", placeholder="0")
-    inv_changes = ui.TextInput(label="Invalid Changes (Number)", placeholder="0")
+    inv_changes = ui.TextInput(
+        label="Invalid Changes (Number & Reasons)", 
+        style=discord.TextStyle.paragraph, 
+        placeholder="e.g. 2 - The spacing was actually correct."
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
         msg = (
@@ -408,7 +481,7 @@ class ReworkReportModal(ui.Modal, title="Rework Report"):
         )
 
         # FIXED: Send to current channel instead of Log Channel
-        await interaction.channel.send(content=msg, view=ReworkView(interaction.user))
+        await interaction.channel.send(content=msg, view=ReworkView(interaction.user, msg))
         await interaction.response.send_message("✅ Rework Report posted in this channel.", ephemeral=True)
 
 # --- BOT SETUP ---
@@ -457,11 +530,12 @@ async def on_message(message):
             queue_pos = len(work_queue)
             time_tag = get_time_tag()
             dm_content = (
-                f"You are added to the [Queue Status](https://discord.com/channels/{message.guild.id}). As of {time_tag}, you are at queue #{queue_pos}.\n\n"
+                f"# Hello {message.author.mention}!\n
+                f"# You are added to the queue. As of {time_tag}, you are at queue #{queue_pos}.\n\n"
                 f"**IMPORTANT REMINDERS:**\n"
                 f"- Audio project assignments are NOT preference-based.\n"
                 f"- Queue numbers are **NOT a guarantee** that files will be assigned chronologically.\n"
-                f"- Please be reminded of our *Reminder on Eligibility for Audio Project Assignments.*"
+                f"- Please be reminded of our *[Reminder on Eligibility for Audio Project Assignments](https://discord.com/channels/1391591320677519431/1391595956247728219/1450362680966774805).*"
             )
             try:
                 await message.author.send(dm_content)
@@ -515,11 +589,12 @@ async def available(interaction: discord.Interaction):
     queue_pos = len(work_queue)
     time_tag = get_time_tag()
     dm_content = (
-        f"You are added to the [Queue Status](https://discord.com/channels/{interaction.guild_id}). As of {time_tag}, you are at queue #{queue_pos}.\n\n"
+        f"# Hello {message.author.mention}!\n
+        f"# You are added to the queue. As of {time_tag}, you are at queue #{queue_pos}.\n\n"
         f"**IMPORTANT REMINDERS:**\n"
         f"- Audio project assignments are NOT preference-based.\n"
         f"- Queue numbers are **NOT a guarantee** that files will be assigned chronologically.\n"
-        f"- Please be reminded of our *Reminder on Eligibility for Audio Project Assignments.*"
+        f"- Please be reminded of our *[Reminder on Eligibility for Audio Project Assignments](https://discord.com/channels/1391591320677519431/1391595956247728219/1450362680966774805).*"
     )
     try:
         await interaction.user.send(dm_content)
@@ -605,9 +680,12 @@ async def assign(interaction: discord.Interaction, member: discord.Member, file_
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
-    await interaction.response.defer(ephemeral=True)
+    
+    # CHANGED: ephemeral=False so everyone sees "Assignment processed"
+    await interaction.response.defer(ephemeral=False)
+    
     await assign_logic(member, file_type.value, interaction.channel, interaction.user)
-    await interaction.followup.send("Assignment processed.", ephemeral=True)
+    await interaction.followup.send("Assignment processed.", ephemeral=False)
 
 @bot.tree.command(name="askfileupdate", description="Ask a user for an update on their file")
 @app_commands.default_permissions(administrator=True)
@@ -616,7 +694,7 @@ async def ask_update(interaction: discord.Interaction, user: discord.Member):
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
-    await interaction.response.send_message(f"🔍 {user.mention}, please provide an update on your file.")
+    await interaction.response.send_message(f"🛎️ {user.mention}, please provide an update on your file.")
 
 @bot.tree.command(name="reassign_notif", description="Notify editor of reassignment")
 @app_commands.default_permissions(administrator=True)
@@ -626,7 +704,7 @@ async def reassign_notif(interaction: discord.Interaction, member: discord.Membe
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
     try:
-        await member.send(f"⚠️ {member.mention}, your file has been REASSIGNED due to idleness.")
+        await member.send(f"⚠️ {member.mention}, your file has been REASSIGNED due to inactivity.")
         await interaction.response.send_message(f"✅ Notification sent to {member.mention}.", ephemeral=True)
         
         log_embed = discord.Embed(title="Reassignment Notice Sent", color=discord.Color.orange())
@@ -691,7 +769,7 @@ async def context_ask_update(interaction: discord.Interaction, member: discord.M
     if not is_swc(interaction):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
-    await interaction.response.send_message(f"🔍 {member.mention}, please provide an update on your file.")
+    await interaction.response.send_message(f"🛎️ {member.mention}, please provide an update on your file.")
 
 # --- NEW CONTEXT MENU: ADD TO QUEUE ---
 @bot.tree.context_menu(name="Add to Queue")
@@ -719,11 +797,12 @@ async def context_add_queue(interaction: discord.Interaction, member: discord.Me
     queue_pos = len(work_queue)
     time_tag = get_time_tag()
     dm_content = (
-        f"You are added to the [Queue Status](https://discord.com/channels/{interaction.guild_id}). As of {time_tag}, you are at queue #{queue_pos}.\n\n"
+        f"# Hello {message.author.mention}!\n
+        f"# You are added to the queue. As of {time_tag}, you are at queue #{queue_pos}.\n\n"
         f"**IMPORTANT REMINDERS:**\n"
-        f"- Audio project assignments are NOT preference-based.\n"
+        f"- Audio project assignments are **NOT preference-based.**\n"
         f"- Queue numbers are **NOT a guarantee** that files will be assigned chronologically.\n"
-        f"- Please be reminded of our *Reminder on Eligibility for Audio Project Assignments.*"
+        f"- Please be reminded of our *[Reminder on Eligibility for Audio Project Assignments](https://discord.com/channels/1391591320677519431/1391595956247728219/1450362680966774805).*"
     )
     try:
         await member.send(dm_content)
