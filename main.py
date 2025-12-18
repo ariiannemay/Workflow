@@ -8,7 +8,7 @@ from flask import Flask
 from threading import Thread
 import asyncio
 
-# --- KEEP ALIVE SECTION (For Railway Health Checks) ---
+# --- KEEP ALIVE SECTION ---
 app = Flask('')
 
 @app.route('/')
@@ -26,10 +26,8 @@ def keep_alive():
 # --- CONFIGURATION ---
 TOKEN = os.getenv("DISCORD_TOKEN") 
 SWC_ROLE_NAME = "Senior Workflow Coordinator"
-# Make sure to update these IDs if you change servers
 SWC_ROLE_IDS = [1391602377672491198, 1450395825208299582] 
 
-# Consolidated TAT Logic: HP is special, everything else is "Standard"
 FILE_CHOICES = [
     app_commands.Choice(name="Aiera Live", value="AIERA LIVE FILE"),
     app_commands.Choice(name="Aiera Batch", value="AIERA BATCH FILE"),
@@ -44,11 +42,10 @@ TIME_BLOCK_CHOICES = [
     app_commands.Choice(name="16:00 - 00:00 EST", value="16:00 - 00:00 EST"),
 ]
 
-# --- PERSISTENCE & DATA MANAGEMENT ---
+# --- PERSISTENCE ---
 QUEUE_FILE = "queue.json"
 CONFIG_FILE = "config.json"
 
-# Global Variables
 work_queue = []
 server_configs = {} 
 available_cooldowns = {} 
@@ -59,7 +56,6 @@ def load_data():
         try:
             with open(QUEUE_FILE, "r") as f:
                 work_queue = json.load(f)
-                print(f"Loaded {len(work_queue)} users from queue file.")
         except Exception as e:
             print(f"Error loading queue: {e}")
             work_queue = []
@@ -115,16 +111,14 @@ def format_seconds(seconds):
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 def calculate_tats(file_type, total_seconds):
-    # Standard Logic for EVERYTHING except HP
     fr_tat = 0
     sv_tat = 0
     overall_tat = 0
 
     if "HP" in file_type:
-        overall_tat = 90 * 60 # Fixed 90 mins
+        overall_tat = 90 * 60 
         return {"FR": "N/A", "SV": "N/A", "OVERALL": "01:30:00"}
     else:
-        # Unified TAT Logic (Using standard 2.0x multiplier logic)
         fr_tat = total_seconds * 0.5
         sv_tat = total_seconds * 1.5
         overall_tat = total_seconds * 2.0
@@ -149,31 +143,27 @@ async def send_log(guild, content=None, embed=None, view=None):
                 return False
     return False
 
-# --- ASSIGNMENT CONFIRMATION SYSTEM ---
+# --- ASSIGNMENT SYSTEM ---
 
 class ReceiptModal(ui.Modal, title="Confirm File Receipt"):
     file_name_input = ui.TextInput(label="File Name", placeholder="Enter the exact file name...")
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Stop the timeout timer on the view since they replied
         if self.view:
             self.view.stop()
-            
         try:
             await interaction.message.edit(view=None)
         except:
             pass
-        
         await interaction.response.send_message(f"🔖 {interaction.user.mention} received **{self.file_name_input.value}**")
 
 class AssignmentConfirmView(ui.View):
     def __init__(self, assigned_user_id, channel, assigned_user_mention):
-        # 5 Minute Timeout (300 seconds)
-        super().__init__(timeout=300)
+        super().__init__(timeout=300) # 5 Min Timeout
         self.assigned_user_id = assigned_user_id
         self.channel = channel
         self.assigned_user_mention = assigned_user_mention
-        self.message = None # To be set after sending
+        self.message = None 
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.assigned_user_id:
@@ -182,12 +172,9 @@ class AssignmentConfirmView(ui.View):
         return True
 
     async def on_timeout(self):
-        # 5 Minutes passed without confirmation
         if self.message:
             try:
-                # Disable buttons
                 await self.message.edit(view=None)
-                # Public shame message
                 await self.channel.send(f"⚠️ {self.assigned_user_mention} failed to confirm receipt of file within 5 minutes.")
             except:
                 pass
@@ -195,7 +182,7 @@ class AssignmentConfirmView(ui.View):
     @ui.button(label="Received", style=discord.ButtonStyle.green, emoji="📥")
     async def received_btn(self, interaction: discord.Interaction, button: ui.Button):
         modal = ReceiptModal()
-        modal.view = self # Pass view to modal so we can stop it
+        modal.view = self 
         await interaction.response.send_modal(modal)
 
     @ui.button(label="Not Received", style=discord.ButtonStyle.red, emoji="❌")
@@ -207,51 +194,64 @@ class AssignmentConfirmView(ui.View):
             pass
         await interaction.response.send_message(f"🔖 {interaction.user.mention} has not received the file. Contact SWC.")
 
-# --- SHARED ASSIGNMENT LOGIC ---
+# --- RESTORED: ASSIGN VIEW FOR CONTEXT MENU ---
+class AssignView(ui.View):
+    def __init__(self, member: discord.Member, channel):
+        super().__init__()
+        self.member = member
+        self.channel = channel
+
+    @discord.ui.select(
+        placeholder="Select File Type to Assign...",
+        options=[
+            discord.SelectOption(label="Aiera Live", value="AIERA LIVE FILE"),
+            discord.SelectOption(label="Aiera Batch", value="AIERA BATCH FILE"),
+            discord.SelectOption(label="HP File", value="HP FILE"),
+            discord.SelectOption(label="Quartr Live", value="QUARTR LIVE FILE"),
+            discord.SelectOption(label="Quartr Batch", value="QUARTR BATCH FILE"),
+        ]
+    )
+    async def select_callback(self, interaction: discord.Interaction, select: ui.Select):
+        file_type = select.values[0]
+        # We pass None for file_name and audio_length since context menu doesn't ask for them
+        await interaction.response.defer() 
+        await assign_logic(self.member, file_type, self.channel, interaction.user, file_name=None, audio_length=None)
+        await interaction.followup.send(f"Assigned {file_type} to {self.member.display_name}", ephemeral=False)
+
+# --- CORE ASSIGN LOGIC ---
 async def assign_logic(user, file_type, channel, assigner, file_name=None, audio_length=None):
     time_tag = get_time_tag()
     global work_queue
     in_queue = False
     
-    # 1. Update Queue
     if any(item['user_id'] == user.id for item in work_queue):
         work_queue = [item for item in work_queue if item['user_id'] != user.id]
         save_queue()
         in_queue = True
 
-    # 2. Prepare Confirmation Buttons
     view = AssignmentConfirmView(user.id, channel, user.mention)
-
-    # 3. Build Public Message content
     msg_content = f"💼 {user.mention} has been assigned a **{file_type}** at {time_tag}."
     
-    # Calculate TATs if info provided
     footer_text = "Please be mindful of your TATs.\nArianne May Amosin"
     embed = None
     
+    # Only calculate TAT if length is provided
     if file_name and audio_length:
         total_seconds = parse_audio_time(audio_length)
         if total_seconds:
             tats = calculate_tats(file_type, total_seconds)
             embed = discord.Embed(color=discord.Color.blue())
-            embed.set_footer(text=f"TAT Info | Audio: {audio_length}\nFR: {tats['FR']} | SV: {tats['SV']} | OVERALL: {tats['OVERALL']}")
+            embed.set_footer(text=f"TAT Info | Audio: {audio_length}\nFR: {tats['FR']} | SV: {tats['SV']} | OVERALL: {tats['OVERALL']}\n\n{footer_text}")
     
-    # Add simple footer if no embed created
     if not embed:
-        # If we can't make a fancy TAT embed, we append the text to the message
         msg_content += f"\n\n{footer_text}"
-    else:
-        # If we have an embed, add the mandatory text to description or footer
-        # Appending the mandatory text to embed footer for clean look
-        old_footer = embed.footer.text
-        embed.set_footer(text=f"{old_footer}\n\n{footer_text}")
+    elif embed and not embed.footer.text:
+         embed.set_footer(text=footer_text)
 
-    # 4. Send Public Message FIRST
     public_msg = await channel.send(content=msg_content, embed=embed, view=view)
-    view.message = public_msg # Attach message to view for timeout handling
+    view.message = public_msg 
     jump_url = public_msg.jump_url
 
-    # 5. Prepare DM
     dm_content = (
         f"# Hello {user.mention}!\n"
         f"# You have been assigned a **{file_type}** at {time_tag}.\n\n" 
@@ -261,14 +261,11 @@ async def assign_logic(user, file_type, channel, assigner, file_name=None, audio
         f"- If you will take longer on a file, keep the SWCs properly appraised. Include your reasons and estimated TAT."
     )
 
-    # 6. Send DM
     try:
         await user.send(dm_content)
     except discord.Forbidden:
-        # REMOVED: "Please check your privacy settings."
         await channel.send(f"⚠️ {user.mention} (I cannot DM you) — You have been assigned a **{file_type}** at {time_tag}.")
 
-    # 7. Log it
     log_embed = discord.Embed(title="File Assigned", color=discord.Color.green())
     log_embed.add_field(name="Editor", value=f"{user.display_name} ({user.id})", inline=True)
     log_embed.add_field(name="File Type", value=file_type, inline=True)
@@ -277,7 +274,7 @@ async def assign_logic(user, file_type, channel, assigner, file_name=None, audio
     log_embed.set_footer(text=f"Was in queue: {in_queue}")
     await send_log(channel.guild, embed=log_embed)
 
-# --- MODALS (FORMS) ---
+# --- MODALS ---
 class AvailabilityModal(ui.Modal):
     def __init__(self, title_text):
         super().__init__(title=title_text)
@@ -293,13 +290,11 @@ class AvailabilityModal(ui.Modal):
             f"- **`CHANGE REQUESTED:`** {self.change_type.value}\n"
             f"- **`REASON:`** {self.reason.value}"
         )
-        
         log_embed = discord.Embed(title=f"{self.title} Request", color=discord.Color.orange())
         log_embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
         log_embed.add_field(name="Time Affected", value=self.time_affected.value, inline=False)
         log_embed.add_field(name="Change Type", value=self.change_type.value, inline=False)
         log_embed.add_field(name="Reason", value=self.reason.value, inline=False)
-        
         await interaction.response.send_message(msg)
         await send_log(interaction.guild, embed=log_embed)
 
@@ -314,12 +309,10 @@ class PermissionTATModal(ui.Modal, title="Permission to exceed TAT"):
             f"- **`FILE NAME:`** {self.file_name.value}\n"
             f"- **`REASON:`** {self.reason.value}"
         )
-        
         log_embed = discord.Embed(title="Permission to exceed TAT", color=discord.Color.red())
         log_embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
         log_embed.add_field(name="File Name", value=self.file_name.value, inline=True)
         log_embed.add_field(name="Reason", value=self.reason.value, inline=False)
-        
         await interaction.response.send_message(msg)
         await send_log(interaction.guild, embed=log_embed)
 
@@ -331,14 +324,52 @@ class FileUpdateModal(ui.Modal, title="File Update"):
     async def on_submit(self, interaction: discord.Interaction):
         msg = (
             f"## File Update\n"
-            f"**EDITOR:** {interaction.user.mention}\n"
-            f"**FILE NAME:** {self.file_name.value}\n"
-            f"**FILE UPDATE:** {self.update_text.value}\n"
-            f"**FILE STATUS:** {self.status.value}"
+            f"- **`EDITOR:`** {interaction.user.mention}\n"
+            f"- **`FILE NAME:`** {self.file_name.value}\n"
+            f"- **`FILE UPDATE:`** {self.update_text.value}\n"
+            f"- **`FILE STATUS:`** {self.status.value}"
         )
         await interaction.response.send_message(msg)
 
-# --- REPORTS & REVERTS ---
+class RevertRequestModal(ui.Modal, title="Revert Request"):
+    file_name = ui.TextInput(label="File Name")
+    file_link = ui.TextInput(label="File Link (Optional)", required=False)
+    reason = ui.TextInput(label="Reason", style=discord.TextStyle.paragraph)
+    notes = ui.TextInput(label="Notes (Optional)", style=discord.TextStyle.paragraph, required=False)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        msg = (
+            f"## Revert Request\n"
+            f"- **`EDITOR:`** {interaction.user.mention}\n"
+            f"- **`FILE NAME:`** {self.file_name.value}\n"
+            f"- **`FILE LINK:`** {self.file_link.value if self.file_link.value else 'N/A'}\n"
+            f"- **`REASON:`** {self.reason.value}\n"
+            f"- **`NOTES:`** {self.notes.value if self.notes.value else 'N/A'}"
+        )
+        await interaction.channel.send(content=msg, view=RevertView(interaction.user, msg))
+        await interaction.response.send_message("✅ Revert Request posted in this channel.", ephemeral=True)
+
+class ReworkReportModal(ui.Modal, title="Rework Report"):
+    file_info = ui.TextInput(label="File Name & Link")
+    file_type = ui.TextInput(label="File Type", placeholder="e.g. Aiera Batch, Aiera Live, HP...")
+    changes_req = ui.TextInput(label="Changes Requested (Number)", placeholder="0")
+    changes_app = ui.TextInput(label="Changes Applied (Number)", placeholder="0")
+    inv_changes = ui.TextInput(label="Invalid Changes", style=discord.TextStyle.paragraph)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        msg = (
+            f"## Rework Report\n"
+            f"- **`EDITOR:`** {interaction.user.mention}\n"
+            f"- **`FILE NAME & LINK:`** {self.file_info.value}\n"
+            f"- **`FILE TYPE:`** {self.file_type.value}\n"
+            f"- **`CHANGES REQUESTED:`** {self.changes_req.value}\n"
+            f"- **`CHANGES APPLIED:`** {self.changes_app.value}\n"
+            f"- **`INVALID CHANGES:`** {self.inv_changes.value}"
+        )
+        await interaction.channel.send(content=msg, view=ReworkView(interaction.user, msg))
+        await interaction.response.send_message("✅ Rework Report posted in this channel.", ephemeral=True)
+
+# --- VIEWS (BUTTONS) ---
 class RevertView(ui.View):
     def __init__(self, target_user: discord.Member, original_msg_content: str):
         super().__init__(timeout=None) 
@@ -409,48 +440,6 @@ class ReworkView(ui.View):
         await interaction.message.edit(content=new_content, view=self)
         await interaction.followup.send("📝 User notified (Noted).", ephemeral=True)
 
-class RevertRequestModal(ui.Modal, title="Revert Request"):
-    file_name = ui.TextInput(label="File Name")
-    file_link = ui.TextInput(label="File Link (Optional)", required=False)
-    reason = ui.TextInput(label="Reason", style=discord.TextStyle.paragraph)
-    notes = ui.TextInput(label="Notes (Optional)", style=discord.TextStyle.paragraph, required=False)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        msg = (
-            f"## Revert Request\n"
-            f"- **`EDITOR:`** {interaction.user.mention}\n"
-            f"- **`FILE NAME:`** {self.file_name.value}\n"
-            f"- **`FILE LINK:`** {self.file_link.value if self.file_link.value else 'N/A'}\n"
-            f"- **`REASON:`** {self.reason.value}\n"
-            f"- **`NOTES:`** {self.notes.value if self.notes.value else 'N/A'}"
-        )
-        await interaction.channel.send(content=msg, view=RevertView(interaction.user, msg))
-        await interaction.response.send_message("✅ Revert Request posted in this channel.", ephemeral=True)
-
-class ReworkReportModal(ui.Modal, title="Rework Report"):
-    file_info = ui.TextInput(label="File Name & Link")
-    file_type = ui.TextInput(label="File Type", placeholder="e.g. Aiera Batch, Aiera Live, HP...")
-    changes_req = ui.TextInput(label="Changes Requested (Number)", placeholder="0")
-    changes_app = ui.TextInput(label="Changes Applied (Number)", placeholder="0")
-    inv_changes = ui.TextInput(
-        label="Invalid Changes (Number & Reasons)", 
-        style=discord.TextStyle.paragraph, 
-        placeholder="e.g. 2 - The spacing was actually correct."
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-        msg = (
-            f"## Rework Report\n"
-            f"- **`EDITOR:`** {interaction.user.mention}\n"
-            f"- **`FILE NAME & LINK:`** {self.file_info.value}\n"
-            f"- **`FILE TYPE:`** {self.file_type.value}\n"
-            f"- **`CHANGES REQUESTED:`** {self.changes_req.value}\n"
-            f"- **`CHANGES APPLIED:`** {self.changes_app.value}\n"
-            f"- **`INVALID CHANGES:`** {self.inv_changes.value}"
-        )
-        await interaction.channel.send(content=msg, view=ReworkView(interaction.user, msg))
-        await interaction.response.send_message("✅ Rework Report posted in this channel.", ephemeral=True)
-
 # --- BOT SETUP ---
 intents = discord.Intents.default()
 intents.members = True
@@ -460,21 +449,27 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     load_data()
-    # Add persistent views for button handling after restart
     bot.add_view(RevertView(None, ""))
     bot.add_view(ReworkView(None, ""))
     print(f'Logged in as {bot.user}')
 
 @bot.command(name="sync")
-async def sync(ctx):
+async def sync(ctx, option: str = None):
     if not any(role.id in SWC_ROLE_IDS for role in ctx.author.roles) and not ctx.author.guild_permissions.administrator:
         await ctx.send("⛔ You do not have permission to sync.")
         return
-    msg = await ctx.send("🔄 Syncing commands...")
+    
+    msg = await ctx.send("🔄 Processing sync...")
     try:
-        bot.tree.copy_global_to(guild=ctx.guild)
-        synced = await bot.tree.sync(guild=ctx.guild)
-        await msg.edit(content=f"✅ Synced {len(synced)} command(s) to this server.")
+        if option == "clear":
+            # Clears global commands to fix duplicates
+            bot.tree.clear_commands(guild=None)
+            await bot.tree.sync(guild=None)
+            await msg.edit(content="✅ Global commands cleared. Now use `!sync` again to load server commands.")
+        else:
+            bot.tree.copy_global_to(guild=ctx.guild)
+            synced = await bot.tree.sync(guild=ctx.guild)
+            await msg.edit(content=f"✅ Synced {len(synced)} command(s) to this server.")
     except Exception as e:
         await msg.edit(content=f"❌ Sync failed: {e}")
 
@@ -487,14 +482,12 @@ async def on_message(message):
         existing_entry = next((item for item in work_queue if item['user_id'] == message.author.id), None)
         
         if existing_entry:
-            # User is ALREADY in queue
             try:
-                await message.delete(delay=3) # Auto delete after 3s
+                await message.delete(delay=3) 
             except:
                 pass
             
             queue_link = existing_entry.get('jump_url', 'the queue channel')
-            
             warn_msg = (
                 f"You are already in the [queue]({queue_link}). "
                 f"Please avoid sending multiple requests for files and ensure you are requesting files within your assigned time block."
@@ -502,15 +495,10 @@ async def on_message(message):
             try:
                 await message.author.send(warn_msg)
             except:
-                pass # Can't DM
-            return # Stop processing
+                pass 
+            return 
 
-        # --- NEW QUEUE ENTRY VIA TEXT ---
-        # Note: Text command doesn't support the Time Block requirement easily.
-        # Assuming Text Command defaults to generic availability or ask them to use Slash command.
-        # For legacy support, we just add them.
-        
-        # Save this message URL for the duplicate check later
+        # --- TEXT COMMAND (Legacy Support) ---
         entry = {
             'user_id': message.author.id,
             'name': message.author.display_name,
@@ -586,7 +574,6 @@ async def tattimer(interaction: discord.Interaction, file_type: app_commands.Cho
 @app_commands.describe(time_block="Choose your default time block as indicated in the sheets")
 @app_commands.choices(time_block=TIME_BLOCK_CHOICES)
 async def available(interaction: discord.Interaction, time_block: app_commands.Choice[str]):
-    # Cooldown Check
     last_used = available_cooldowns.get(interaction.user.id, 0)
     now_ts = datetime.now().timestamp()
     if now_ts - last_used < 30:
@@ -594,7 +581,6 @@ async def available(interaction: discord.Interaction, time_block: app_commands.C
         return
     available_cooldowns[interaction.user.id] = now_ts
 
-    # Duplicate Check
     existing_entry = next((item for item in work_queue if item['user_id'] == interaction.user.id), None)
     if existing_entry:
         queue_link = existing_entry.get('jump_url', 'the queue channel')
@@ -605,8 +591,6 @@ async def available(interaction: discord.Interaction, time_block: app_commands.C
         await interaction.response.send_message(warn_msg, ephemeral=True)
         return
 
-    # Add to Queue
-    # We defer so we can fetch the message URL after sending
     await interaction.response.send_message(f"👋🏼 {interaction.user.mention} is available for a file. Added to the queue ({time_block.value}).")
     msg = await interaction.original_response()
     
@@ -619,7 +603,6 @@ async def available(interaction: discord.Interaction, time_block: app_commands.C
     })
     save_queue()
     
-    # DM Logic
     queue_pos = len(work_queue)
     time_tag = get_time_tag()
     dm_content = (
@@ -672,7 +655,6 @@ async def show_queue(interaction: discord.Interaction):
     embed = discord.Embed(title="Current Work Queue", color=discord.Color.blue())
     desc = f"**As of:** {current_time_tag}\n\n"
     
-    # Slice to prevent overflow
     display_limit = 15
     for idx, item in enumerate(work_queue[:display_limit], 1):
         member = interaction.guild.get_member(item['user_id'])
@@ -776,8 +758,20 @@ async def tat_delay(interaction: discord.Interaction):
 async def file_update(interaction: discord.Interaction):
     await interaction.response.send_modal(FileUpdateModal())
 
-# --- CONTEXT MENU COMMANDS (RIGHT CLICK) ---
-# Note: Context menus can't accept additional arguments easily, so they stay simple
+# --- CONTEXT MENU COMMANDS ---
+
+@bot.tree.context_menu(name="Assign a File")
+@app_commands.default_permissions(administrator=True)
+@app_commands.guild_only() 
+async def context_assign(interaction: discord.Interaction, member: discord.Member):
+    if not is_swc(interaction):
+        await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
+        return
+    await interaction.response.send_message(
+        f"Select file type for {member.mention}:", 
+        view=AssignView(member, interaction.channel), 
+        ephemeral=True
+    )
 
 @bot.tree.context_menu(name="Remove from Queue")
 @app_commands.default_permissions(administrator=True)
@@ -805,7 +799,6 @@ async def context_ask_update(interaction: discord.Interaction, member: discord.M
         return
     await interaction.response.send_message(f"🔍 {member.mention}, please provide an update on your file.")
 
-# --- NEW CONTEXT MENU: ADD TO QUEUE ---
 @bot.tree.context_menu(name="Add to Queue")
 @app_commands.default_permissions(administrator=True)
 @app_commands.guild_only()
@@ -819,7 +812,6 @@ async def context_add_queue(interaction: discord.Interaction, member: discord.Me
         await interaction.response.send_message(f"{member.mention} is already in the queue!", ephemeral=True)
         return
 
-    # Assuming default time block if added by admin via Context Menu
     default_tb = "Assigned by Admin"
 
     work_queue.append({
@@ -851,7 +843,6 @@ async def context_add_queue(interaction: discord.Interaction, member: discord.Me
     log_embed.add_field(name="Added By", value=interaction.user.mention, inline=True)
     await send_log(interaction.guild, embed=log_embed)
 
-# --- REVERT REQUEST & REWORK REPORT ---
 @bot.tree.command(name="revertrequest", description="Submit a request for file revert")
 @app_commands.guild_only() 
 async def revert_request(interaction: discord.Interaction):
