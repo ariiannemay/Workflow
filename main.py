@@ -228,7 +228,7 @@ class AssignView(ui.View):
         file_type = select.values[0]
         await interaction.response.defer() 
         await assign_logic(self.member, file_type, self.channel, interaction.user, file_name=None, audio_length=None)
-        await interaction.followup.send(f"Assigned {file_type} to {self.member.display_name}", ephemeral=False)
+        await interaction.followup.send(f"Assigned {file_type} to {self.member.display_name}", ephemeral=True)
 
 # --- CORE ASSIGN LOGIC ---
 async def assign_logic(user, file_type, channel, assigner, file_name=None, audio_length=None):
@@ -743,7 +743,7 @@ async def assign(interaction: discord.Interaction, member: discord.Member, file_
     
     await interaction.response.defer(ephemeral=False)
     await assign_logic(member, file_type.value, interaction.channel, interaction.user, file_name, audio_length)
-    await interaction.followup.send("Assignment processed.", ephemeral=False)
+    await interaction.followup.send("Assignment processed.", ephemeral=True)
 
 @bot.tree.command(name="askfileupdate", description="Ask a user for an update on their file")
 @app_commands.default_permissions(administrator=True)
