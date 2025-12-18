@@ -588,7 +588,7 @@ async def on_message(message):
         work_queue.append(entry)
         save_queue()
         
-        await message.reply(f"👋🏼 {message.author.mention} is available for a file.\n-# - Added to the queue (Default Time Block is 00:00 - 08:00 EST).", mention_author=True)
+        await message.reply(f"👋🏼 {message.author.mention} is available for a file.\n-# - Requesting Editor's default Time Block is 00:00 - 08:00 EST).", mention_author=True)
         
         queue_pos = len(work_queue)
         time_tag = get_time_tag()
@@ -655,7 +655,7 @@ async def tattimer(interaction: discord.Interaction, file_type: app_commands.Cho
 async def available(interaction: discord.Interaction, time_block: app_commands.Choice[str]):
     last_used = available_cooldowns.get(interaction.user.id, 0)
     now_ts = datetime.now().timestamp()
-    if now_ts - last_used < 30:
+    if now_ts - last_used < 600:
         await interaction.response.send_message("⏳ Please wait a moment before using this again.", ephemeral=True)
         return
     available_cooldowns[interaction.user.id] = now_ts
@@ -670,7 +670,7 @@ async def available(interaction: discord.Interaction, time_block: app_commands.C
         await interaction.response.send_message(warn_msg, ephemeral=True)
         return
 
-    await interaction.response.send_message(f"👋🏼 {interaction.user.mention} is available for a file.\n-# - Added to the queue. (Default Time Block is {time_block.value}).")
+    await interaction.response.send_message(f"👋🏼 {interaction.user.mention} is available for a file.\n-# - Requesting Editor's default Time Block is {time_block.value}.")
     msg = await interaction.original_response()
     
     work_queue.append({
