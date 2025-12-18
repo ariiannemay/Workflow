@@ -588,7 +588,7 @@ async def on_message(message):
         work_queue.append(entry)
         save_queue()
         
-        await message.reply(f"👋🏼 {message.author.mention} is available for a file.\n-# - Requesting Editor's default Time Block is 00:00 - 08:00 EST).", mention_author=True)
+        await message.reply(f"👋🏼 {message.author.mention} is available for a file.\n-# - Requesting Editor's default Time Block is {time_block.value}.", mention_author=True)
         
         queue_pos = len(work_queue)
         time_tag = get_time_tag()
