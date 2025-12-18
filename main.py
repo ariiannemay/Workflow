@@ -670,7 +670,7 @@ async def available(interaction: discord.Interaction, time_block: app_commands.C
         await interaction.response.send_message(warn_msg, ephemeral=True)
         return
 
-    await interaction.response.send_message(f"👋🏼 {interaction.user.mention} is available for a file.\n-# - Added to the queue ({time_block.value}).")
+    await interaction.response.send_message(f"👋🏼 {interaction.user.mention} is available for a file.\n-# - Added to the queue. (Default Time Block is {time_block.value}).")
     msg = await interaction.original_response()
     
     work_queue.append({
