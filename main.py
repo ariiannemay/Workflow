@@ -155,7 +155,7 @@ class ReceiptModal(ui.Modal, title="Confirm File Receipt"):
             await interaction.message.edit(view=None)
         except:
             pass
-        await interaction.response.send_message(f"🔖 {interaction.user.mention} received **{self.file_name_input.value}**")
+        await interaction.response.send_message(f"🔖 {interaction.user.mention} confirms receipt of **{self.file_name_input.value}**")
 
 class AssignmentConfirmView(ui.View):
     def __init__(self, assigned_user_id, channel, assigned_user_mention):
@@ -172,12 +172,25 @@ class AssignmentConfirmView(ui.View):
         return True
 
     async def on_timeout(self):
+        # 1. Disable the buttons on the original message first
         if self.message:
             try:
                 await self.message.edit(view=None)
-                await self.channel.send(f"⚠️ {self.assigned_user_mention} failed to confirm receipt of file within 5 minutes.")
             except:
-                pass
+                pass # Message might be deleted already
+
+        text = f"⚠️ {self.assigned_user_mention} failed to confirm receipt of file within 5 minutes."
+
+        # 2. Try to REPLY to the original message
+        if self.message:
+            try:
+                await self.message.reply(text)
+                return # Exit if reply was successful
+            except:
+                pass # Continue to fallback if reply failed (e.g. message deleted)
+
+        # 3. Fallback: Send to channel normally if reply failed
+        await self.channel.send(text)
 
     @ui.button(label="Received", style=discord.ButtonStyle.green, emoji="📥")
     async def received_btn(self, interaction: discord.Interaction, button: ui.Button):
@@ -213,7 +226,6 @@ class AssignView(ui.View):
     )
     async def select_callback(self, interaction: discord.Interaction, select: ui.Select):
         file_type = select.values[0]
-        # We pass None for file_name and audio_length since context menu doesn't ask for them
         await interaction.response.defer() 
         await assign_logic(self.member, file_type, self.channel, interaction.user, file_name=None, audio_length=None)
         await interaction.followup.send(f"Assigned {file_type} to {self.member.display_name}", ephemeral=False)
@@ -232,10 +244,9 @@ async def assign_logic(user, file_type, channel, assigner, file_name=None, audio
     view = AssignmentConfirmView(user.id, channel, user.mention)
     msg_content = f"💼 {user.mention} has been assigned a **{file_type}** at {time_tag}."
     
-    footer_text = "Please be mindful of your TATs.\nArianne May Amosin"
+    footer_text = "Please be mindful of your TATs."
     embed = None
     
-    # Only calculate TAT if length is provided
     if file_name and audio_length:
         total_seconds = parse_audio_time(audio_length)
         if total_seconds:
@@ -267,10 +278,10 @@ async def assign_logic(user, file_type, channel, assigner, file_name=None, audio
         await channel.send(f"⚠️ {user.mention} (I cannot DM you) — You have been assigned a **{file_type}** at {time_tag}.")
 
     log_embed = discord.Embed(title="File Assigned", color=discord.Color.green())
-    log_embed.add_field(name="Editor", value=f"{user.display_name} ({user.id})", inline=True)
-    log_embed.add_field(name="File Type", value=file_type, inline=True)
+    log_embed.add_field(name="Editor", value=user.mention, inline=False)
+    log_embed.add_field(name="File Type", value=file_type, inline= False)
     if file_name: log_embed.add_field(name="File Name", value=file_name, inline=False)
-    log_embed.add_field(name="Assigned By", value=assigner.display_name, inline=False)
+    log_embed.add_field(name="Assigned By", value=assigner.mention, inline=False)
     log_embed.set_footer(text=f"Was in queue: {in_queue}")
     await send_log(channel.guild, embed=log_embed)
 
@@ -292,26 +303,28 @@ class AvailabilityModal(ui.Modal):
         )
         log_embed = discord.Embed(title=f"{self.title} Request", color=discord.Color.orange())
         log_embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        log_embed.add_field(name="Editor", value=interaction.user.mention, inline=False)
         log_embed.add_field(name="Time Affected", value=self.time_affected.value, inline=False)
         log_embed.add_field(name="Change Type", value=self.change_type.value, inline=False)
         log_embed.add_field(name="Reason", value=self.reason.value, inline=False)
         await interaction.response.send_message(msg)
         await send_log(interaction.guild, embed=log_embed)
 
-class PermissionTATModal(ui.Modal, title="Permission to exceed TAT"):
+class TATDelayNoticeModal(ui.Modal, title="TAT Delay Notice"):
     file_name = ui.TextInput(label="File Name")
     reason = ui.TextInput(label="Reason for TAT delay", style=discord.TextStyle.paragraph)
 
     async def on_submit(self, interaction: discord.Interaction):
         msg = (
-            f"## Permission to exceed TAT\n"
+            f"## TAT Delay Notice\n"
             f"- **`EDITOR:`** {interaction.user.mention}\n"
             f"- **`FILE NAME:`** {self.file_name.value}\n"
             f"- **`REASON:`** {self.reason.value}"
         )
-        log_embed = discord.Embed(title="Permission to exceed TAT", color=discord.Color.red())
+        log_embed = discord.Embed(title="TAT Delay Notice", color=discord.Color.red())
         log_embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-        log_embed.add_field(name="File Name", value=self.file_name.value, inline=True)
+        log_embed.add_field(name="Editor", value=interaction.user.mention, inline=False)
+        log_embed.add_field(name="File Name", value=self.file_name.value, inline= False)
         log_embed.add_field(name="Reason", value=self.reason.value, inline=False)
         await interaction.response.send_message(msg)
         await send_log(interaction.guild, embed=log_embed)
@@ -450,7 +463,7 @@ class MyBot(commands.Bot):
 intents = discord.Intents.default()
 intents.members = True # Ensure this is ON in Dev Portal
 intents.message_content = True
-bot = MyBot(command_prefix="!", intents=intents)
+bot = MyBot(command_prefix="fd!", intents=intents)
 
 @bot.event
 async def on_ready():
@@ -516,7 +529,7 @@ async def on_message(message):
         work_queue.append(entry)
         save_queue()
         
-        await message.reply(f"👋🏼 {message.author.mention} is available for a file.\n-# - Added to the queue.", mention_author=True)
+        await message.reply(f"👋🏼 {message.author.mention} is available for a file.\n-# - Added to the queue (Default Time Block is 00:00 - 08:00 EST).", mention_author=True)
         
         queue_pos = len(work_queue)
         time_tag = get_time_tag()
@@ -598,7 +611,7 @@ async def available(interaction: discord.Interaction, time_block: app_commands.C
         await interaction.response.send_message(warn_msg, ephemeral=True)
         return
 
-    await interaction.response.send_message(f"👋🏼 {interaction.user.mention} is available for a file. Added to the queue ({time_block.value}).")
+    await interaction.response.send_message(f"👋🏼 {interaction.user.mention} is available for a file.\n-# - Added to the queue ({time_block.value}).")
     msg = await interaction.original_response()
     
     work_queue.append({
@@ -683,6 +696,17 @@ async def remove_user(interaction: discord.Interaction, member: discord.Member):
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
     global work_queue
+    
+    found = False
+    for item in work_queue:
+        if item['user_id'] == member.id:
+            found = True
+            break
+            
+    if not found:
+        await interaction.response.send_message(f"❌ {member.mention} is not in the queue.", ephemeral=True)
+        return
+
     work_queue = [item for item in work_queue if item['user_id'] != member.id]
     save_queue()
     await interaction.response.send_message(f"✔️ Removed {member.mention} from the queue.", ephemeral=True)
@@ -759,7 +783,7 @@ async def unplanned(interaction: discord.Interaction):
 
 @bot.tree.command(name="tatdelay", description="Ask permission to exceed TAT")
 async def tat_delay(interaction: discord.Interaction):
-    await interaction.response.send_modal(PermissionTATModal())
+    await interaction.response.send_modal(TATDelayNoticeModal())
 
 @bot.tree.command(name="fileupdate", description="Provide a file update")
 async def file_update(interaction: discord.Interaction):
@@ -788,6 +812,17 @@ async def context_remove(interaction: discord.Interaction, member: discord.Membe
         await interaction.response.send_message("⛔ SWC Access Only.", ephemeral=True)
         return
     global work_queue
+    
+    found = False
+    for item in work_queue:
+        if item['user_id'] == member.id:
+            found = True
+            break
+            
+    if not found:
+        await interaction.response.send_message(f"❌ {member.mention} is not in the queue.", ephemeral=True)
+        return
+
     work_queue = [item for item in work_queue if item['user_id'] != member.id]
     save_queue()
     await interaction.response.send_message(f"✔️ Removed {member.mention} from the queue.", ephemeral=True)
