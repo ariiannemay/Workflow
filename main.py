@@ -649,7 +649,7 @@ async def on_message(message):
         work_queue.append(entry)
         save_queue()
         
-        await message.reply(f"👋🏼 {message.author.mention} is available for a file.\n-# - Added to the queue (Default Time Block is 00:00 - 08:00 EST).", mention_author=True)
+        await message.reply(f"👋🏼 {message.author.mention} is available for a file.\n-# - Requesting Editor's Default Time Block is {time_block.value}.", mention_author=True)
         
         queue_pos = len(work_queue)
         time_tag = get_time_tag()
@@ -731,7 +731,7 @@ async def available(interaction: discord.Interaction, time_block: app_commands.C
         await interaction.response.send_message(warn_msg, ephemeral=True)
         return
 
-    await interaction.response.send_message(f"👋🏼 {interaction.user.mention} is available for a file.\n-# - Added to the queue ({time_block.value}).")
+    await interaction.response.send_message(f"👋🏼 {interaction.user.mention} is available for a file.\n-# - Requesting Editor's Default Time Block is {time_block.value}.")
     msg = await interaction.original_response()
     
     work_queue.append({
